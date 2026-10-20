@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -309,5 +310,41 @@ func TestHandleDirLoadedRoutesByID(t *testing.T) {
 	}
 	if b.HandleDirLoaded(msg) {
 		t.Error("another panel must ignore a load addressed to a different panel")
+	}
+}
+
+// TestSpaceSelectSizesDirectory checks space_action = "select": Space tags the
+// entry without moving the cursor and the directory shows its total size.
+func TestSpaceSelectSizesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	mustMkdir(t, filepath.Join(dir, "sub"))
+	mustMkdir(t, filepath.Join(dir, "sub", "deep"))
+	mustWrite(t, filepath.Join(dir, "sub", "a"), make([]byte, 1000), 0o644)
+	mustWrite(t, filepath.Join(dir, "sub", "deep", "b"), make([]byte, 1048), 0o644)
+
+	m := newTestModel(t, dir)
+	m.cfg.Behavior.SpaceAction = "select"
+
+	cmd := m.handleSpace()
+	if !m.selected[0] || m.cursor != 0 {
+		t.Fatalf("want entry 0 tagged with cursor kept, got selected=%v cursor=%d", m.selected, m.cursor)
+	}
+	if cmd == nil {
+		t.Fatal("want a size command for a directory")
+	}
+	msg := cmd().(DirSizeMsg)
+	if msg.Size != 2048 {
+		t.Fatalf("want 2048 bytes, got %d", msg.Size)
+	}
+	if !m.HandleDirSize(msg) {
+		t.Fatal("size message not accepted by its own panel")
+	}
+	if row := ansi.Strip(m.renderRow(0, 80, theme.Default())); !strings.Contains(row, "2.0K") {
+		t.Fatalf("want 2.0K in row, got %q", row)
+	}
+
+	m.handleSpace()
+	if m.selected[0] {
+		t.Fatal("second Space should untag")
 	}
 }

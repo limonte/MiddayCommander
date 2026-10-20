@@ -99,7 +99,9 @@ func (m Model) renderRow(idx, width int, th theme.Theme) string {
 	sizeStr := ""
 	timeStr := ""
 	if info != nil {
-		if isDir {
+		if size, ok := m.dirSizes[m.Location().Join(name)]; ok && isDir {
+			sizeStr = FormatSize(size)
+		} else if isDir {
 			sizeStr = "<DIR>"
 		} else {
 			sizeStr = FormatSize(info.Size())
