@@ -47,7 +47,7 @@ type Model struct {
 	cursor     int              // highlighted entry index
 	offset     int              // scroll offset for viewport
 	selected   map[int]bool     // tagged/selected entries
-	dirSizes   map[string]int64 // computed directory sizes, by full path
+	dirSizes   map[string]int64 // computed directory sizes by full path, -1 while pending
 	sortMode   SortMode
 	showHidden bool // whether to show dotfiles
 	width      int
@@ -513,12 +513,21 @@ func (m *Model) selectAndSize() tea.Cmd {
 	}
 	path := m.CurrentPath()
 	if _, ok := m.dirSizes[path]; ok {
-		return nil
+		return nil // already sized or being sized
 	}
+	if m.dirSizes == nil {
+		m.dirSizes = make(map[string]int64)
+	}
+	m.dirSizes[path] = -1
 	id := m.id
 	return func() tea.Msg {
 		var size int64
-		filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		// WalkDir doesn't follow a symlinked root, so resolve it first.
+		root, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			root = path
+		}
+		filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil // unreadable entries are skipped, as du does
 			}
@@ -539,15 +548,15 @@ type DirSizeMsg struct {
 }
 
 // HandleDirSize records a computed size, reporting whether it belonged to
-// this panel.
+// this panel. A result whose pending marker was cleared by a reload is stale
+// and dropped.
 func (m *Model) HandleDirSize(msg DirSizeMsg) bool {
 	if msg.ID != m.id {
 		return false
 	}
-	if m.dirSizes == nil {
-		m.dirSizes = make(map[string]int64)
+	if size, ok := m.dirSizes[msg.Path]; ok && size < 0 {
+		m.dirSizes[msg.Path] = msg.Size
 	}
-	m.dirSizes[msg.Path] = msg.Size
 	return true
 }
 

@@ -332,6 +332,12 @@ func TestSpaceSelectSizesDirectory(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("want a size command for a directory")
 	}
+	if m.handleSpace(); m.handleSpace() != nil {
+		t.Fatal("Space while a walk is pending must not start another")
+	}
+	if row := ansi.Strip(m.renderRow(0, 80, theme.Default())); !strings.Contains(row, "...") {
+		t.Fatalf("want ... in row while pending, got %q", row)
+	}
 	msg := cmd().(DirSizeMsg)
 	if msg.Size != 2048 {
 		t.Fatalf("want 2048 bytes, got %d", msg.Size)
@@ -346,5 +352,34 @@ func TestSpaceSelectSizesDirectory(t *testing.T) {
 	m.handleSpace()
 	if m.selected[0] {
 		t.Fatal("second Space should untag")
+	}
+}
+
+// TestSpaceSelectSymlinkAndStale checks a symlinked directory is sized by its
+// target, and a result arriving after a reload is dropped.
+func TestSpaceSelectSymlinkAndStale(t *testing.T) {
+	dir := t.TempDir()
+	mustMkdir(t, filepath.Join(dir, "real"))
+	mustWrite(t, filepath.Join(dir, "real", "a"), make([]byte, 2048), 0o644)
+	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestModel(t, dir)
+	m.cfg.Behavior.SpaceAction = "select"
+	m.cursor = 0 // "link" sorts before "real"
+	if m.CurrentEntry().Name() != "link" {
+		t.Fatalf("want link under cursor, got %s", m.CurrentEntry().Name())
+	}
+
+	msg := m.handleSpace()().(DirSizeMsg)
+	if msg.Size != 2048 {
+		t.Fatalf("want symlinked dir sized by target, got %d", msg.Size)
+	}
+
+	m.dirSizes = nil // what HandleDirLoaded does on reload
+	m.HandleDirSize(msg)
+	if _, ok := m.dirSizes[msg.Path]; ok {
+		t.Fatal("a result arriving after a reload must be dropped")
 	}
 }
